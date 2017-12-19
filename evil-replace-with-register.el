@@ -64,6 +64,14 @@
 (autoload 'evil-replace-with-register "evil-replace-with-register"
   "Replacing an existing text with the contents of a register" t)
 
+(defun insert-and-maybe-indent (count text beg)
+  (dotimes (_ count)
+    (insert text))
+  (when (and evil-replace-with-register-indent (/= (line-number-at-pos beg) (line-number-at-pos)))
+    ;; indent if more then one line was inserted
+    (save-excursion
+      (evil-indent beg (point)))))
+
 (evil-define-operator evil-replace-with-register (count beg end type register)
   "Replacing an existing text with the contents of a register"
   :move-point nil
@@ -73,25 +81,28 @@
                   (evil-get-register register)
                 (current-kill 0))))
     (goto-char beg)
-    (if (eq type 'block)
-        (evil-apply-on-block
-         (lambda (begcol endcol)
-           (let ((maxcol (evil-column (line-end-position))))
-             (when (< begcol maxcol)
-               (setq endcol (min endcol maxcol))
-               (let ((beg (evil-move-to-column begcol nil t))
-                     (end (evil-move-to-column endcol nil t)))
-                 (delete-region beg end)
-                 (dotimes (_ count)
-                   (insert text))))))
-         beg end t)
-      (delete-region beg end)
-      (dotimes (_ count)
-        (insert text))
-      (when (and evil-replace-with-register-indent (/= (line-number-at-pos beg) (line-number-at-pos)))
-        ;; indent if more then one line was inserted
-        (save-excursion
-          (evil-indent beg (point)))))))
+    (cond ((eq type 'block) (evil-apply-on-block
+                             (lambda (begcol endcol)
+                               (let ((maxcol (evil-column (line-end-position))))
+                                 (when (< begcol maxcol)
+                                   (setq endcol (min endcol maxcol))
+                                   (let ((beg (evil-move-to-column begcol nil t))
+                                         (end (evil-move-to-column endcol nil t)))
+                                     (delete-region beg end)
+                                     (dotimes (_ count)
+                                       (insert text))))))
+                             beg end t))
+          ;; if replace is charwise and yank/kill is linewise, force a charwise paste
+	  ((or (eq type 'inclusive) (eq type 'exclusive)) (delete-region beg end)
+	   (let ((text (replace-regexp-in-string "\n$" "" text)))
+             (insert-and-maybe-indent count text beg)))
+          ;; if replace is linewise and yank/kill is charwise, force a linewise paste
+          ((eq type 'line) (if (string-suffix-p "\n" text)
+                               (delete-region beg end)
+                             (delete-region beg (- end 1)))
+           (insert-and-maybe-indent count text beg))
+          (t (delete-region beg end)
+             (insert-and-maybe-indent count text beg)))))
 
 ;;;###autoload
 (defun evil-replace-with-register-install ()
